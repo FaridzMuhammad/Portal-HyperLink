@@ -16,6 +16,8 @@
     "db:init": "psql -U postgres -d portal_link < database.sql",
     "db:create": "psql -U postgres -c 'CREATE DATABASE portal_link;'",
     "db:reset": "npm run db:init",
+    "build:all": "npm run server:build && npm run build",
+    "start:prod": "node server/dist/index.js",
     "dev:full": "concurrently \"npm run server:dev\" \"npm run dev\""
   },
   "dependencies": {

@@ -184,38 +184,51 @@ VITE_API_URL=/api
 ### 5. Build untuk Production
 
 ```bash
-# Build backend
-npm run server:build
-
-# Build frontend
-npm run build
+# Build backend + frontend sekaligus
+npm run build:all
 ```
 
-### 6. Jalankan Backend dengan PM2
-
-Di aaPanel, buka **App Manager** atau gunakan terminal:
-
+Atau terpisah:
 ```bash
-npm install -g pm2
-
-# Jalankan backend
-pm2 start server/dist/index.js --name portal-api
-
-# Simpan konfigurasi PM2
-pm2 save
-pm2 startup
+npm run server:build   # Build backend → server/dist/
+npm run build          # Build frontend → dist/
 ```
 
-### 7. Setup Nginx Reverse Proxy
+### 6. Jalankan Aplikasi via aaPanel Node Project (Recommended)
+
+> **Kenapa cukup 1 project?** Backend Express sudah dikonfigurasi untuk serve file static frontend (folder `dist/`) dan logo (folder `public/`). Jadi cukup jalankan backend saja, frontend otomatis ikut terserve.
 
 Di aaPanel:
 
-1. **Website** → **Add Site**
-2. Pilih **Reverse Proxy**
-3. Domain: `portal-link.com` (sesuaikan)
-4. Target URL: `http://127.0.0.1:3001`
+1. Buka **App Manager** → **Node Version Manager** → pastikan Node 20+ terinstall
+2. Klik **Add Node Project**
+3. Isi form seperti berikut:
 
-Atau edit konfigurasi Nginx manual:
+| Field | Nilai |
+|-------|-------|
+| **Path** | `/www/wwwroot/portal-link` |
+| **Name** | `Portal-HyperLink` |
+| **Run opt** | **Custom Command** → `node server/dist/index.js` |
+| **Port** | `3001` |
+| **User** | `www` |
+| **Node** | `v20.x` atau lebih tinggi |
+| **Domain name** | `portal-link.com` (opsional) |
+
+4. Klik **Confirm**
+
+aaPanel akan otomatis:
+- Jalankan backend di port 3001
+- Setup Nginx reverse proxy (jika domain diisi)
+- Serve frontend static dari folder `dist/`
+- Serve API dari `/api/`
+
+### 7. Setup Nginx (jika tidak pakai domain di Node Project)
+
+Kalau domain tidak diisi di Node Project, tambahkan manual di **Website** → **Add Site** → **Reverse Proxy**:
+
+- Target URL: `http://127.0.0.1:3001`
+
+Atau konfigurasi Nginx manual:
 
 ```nginx
 server {
@@ -223,13 +236,7 @@ server {
     server_name portal-link.com;
 
     location / {
-        root /www/wwwroot/portal-link/dist;
-        index index.html;
-        try_files $uri $uri/ /index.html;
-    }
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:3001/api/;
+        proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -265,9 +272,8 @@ curl https://portal-link.com/api/links
 cd /www/wwwroot/portal-link
 git pull
 npm install
-npm run server:build
-npm run build
-pm2 restart portal-api
+npm run build:all
+pm2 restart Portal-HyperLink   # atau via aaPanel App Manager → Restart
 ```
 
 ## Script npm
@@ -279,6 +285,8 @@ pm2 restart portal-api
 | `npm run dev:full` | Jalankan backend + frontend sekaligus |
 | `npm run build` | Build frontend untuk production |
 | `npm run server:build` | Build backend TypeScript ke JS |
+| `npm run build:all` | Build backend + frontend sekaligus |
+| `npm run start:prod` | Jalankan backend hasil build (production) |
 | `npm run server:start` | Jalankan backend hasil build |
 | `npm run db:create` | Buat database PostgreSQL |
 | `npm run db:init` | Jalankan schema & seed SQL |
