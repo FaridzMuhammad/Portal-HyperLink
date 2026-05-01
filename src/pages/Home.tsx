@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Search, Globe, Plus, LogIn, LogOut, Shield, Settings, Tags
+  Search, Globe, Plus, LogIn, LogOut, Shield, Settings, Tags, Loader2, AlertCircle
 } from 'lucide-react';
 import LinkCard from '@/components/LinkCard';
 import LinkDialog, { type LinkData } from '@/components/LinkDialog';
@@ -8,6 +8,19 @@ import LoginDialog from '@/components/LoginDialog';
 import SettingsDialog from '@/components/SettingsDialog';
 import CategoryDialog, { type CategoryData } from '@/components/CategoryDialog';
 import { getIconByName } from '@/components/IconPicker';
+import {
+  fetchLinks,
+  fetchCategories,
+  createLink,
+  updateLinkApi,
+  deleteLinkApi,
+  createCategory,
+  updateCategoryApi,
+  deleteCategoryApi,
+  fetchSetting,
+  setSetting,
+  checkHealth,
+} from '@/lib/api';
 
 const initialCategories: CategoryData[] = [
   { id: 'sosial', label: 'Sosial Media', iconName: 'MessageCircle' },
@@ -104,7 +117,47 @@ export default function Home() {
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('portal_admin') === 'true');
   const [adminPassword, setAdminPassword] = useState(() => getSavedPassword());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [backendOnline, setBackendOnline] = useState(false);
 
+  // Load from backend on mount
+  useEffect(() => {
+    async function loadData() {
+      try {
+        setLoading(true);
+        const healthy = await checkHealth();
+        setBackendOnline(healthy);
+
+        if (healthy) {
+          const [linksData, categoriesData, passwordData] = await Promise.all([
+            fetchLinks(),
+            fetchCategories(),
+            fetchSetting('admin_password'),
+          ]);
+
+          if (linksData.length > 0) setLinks(linksData);
+          if (categoriesData.length > 0) setCategories(categoriesData);
+          if (passwordData) {
+            const decoded = atob(passwordData);
+            setAdminPassword(decoded);
+            savePassword(decoded);
+          }
+          setError('');
+        } else {
+          setError('Backend tidak tersedia. Menggunakan data lokal.');
+        }
+      } catch (err: any) {
+        setError('Gagal memuat data dari server. Menggunakan data lokal.');
+        console.error('API Error:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+  }, []);
+
+  // Sync to localStorage for fallback
   useEffect(() => {
     saveLinks(links);
   }, [links]);
@@ -135,15 +188,35 @@ export default function Home() {
     setDialogOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    setLinks(prev => prev.filter(l => l.id !== id));
+  const handleDelete = async (id: string) => {
+    if (!confirm('Hapus link ini?')) return;
+    try {
+      if (backendOnline) await deleteLinkApi(id);
+      setLinks(prev => prev.filter(l => l.id !== id));
+    } catch (err: any) {
+      setError('Gagal menghapus link: ' + err.message);
+    }
   };
 
-  const handleSave = (link: LinkData) => {
-    if (editingLink) {
-      setLinks(prev => prev.map(l => l.id === link.id ? link : l));
-    } else {
-      setLinks(prev => [...prev, link]);
+  const handleSave = async (link: LinkData) => {
+    try {
+      if (backendOnline) {
+        if (editingLink) {
+          const updated = await updateLinkApi(link);
+          setLinks(prev => prev.map(l => l.id === updated.id ? { ...updated, iconName: updated.iconName || updated.icon_name } : l));
+        } else {
+          const created = await createLink(link);
+          setLinks(prev => [...prev, { ...created, iconName: created.iconName || created.icon_name }]);
+        }
+      } else {
+        if (editingLink) {
+          setLinks(prev => prev.map(l => l.id === link.id ? link : l));
+        } else {
+          setLinks(prev => [...prev, link]);
+        }
+      }
+    } catch (err: any) {
+      setError('Gagal menyimpan link: ' + err.message);
     }
   };
 
@@ -157,31 +230,78 @@ export default function Home() {
     setIsAdmin(false);
   };
 
-  const handleReset = () => {
-    if (confirm('Reset semua data ke default?')) {
+  const handleReset = async () => {
+    if (!confirm('Reset semua data ke default?')) return;
+    try {
+      if (backendOnline) {
+        // Delete all existing links and categories
+        await Promise.all(links.map(l => deleteLinkApi(l.id)));
+        await Promise.all(categories.map(c => deleteCategoryApi(c.id)));
+        // Recreate defaults
+        await Promise.all(initialCategories.map(c => createCategory(c)));
+        await Promise.all(initialLinks.map(l => createLink(l)));
+      }
       setLinks(initialLinks);
       setCategories(initialCategories);
+      setError('');
+    } catch (err: any) {
+      setError('Gagal reset data: ' + err.message);
     }
   };
 
-  const handlePasswordChange = (newPassword: string) => {
+  const handlePasswordChange = async (newPassword: string) => {
+    try {
+      if (backendOnline) {
+        await setSetting('admin_password', btoa(newPassword));
+      }
+    } catch (err: any) {
+      setError('Gagal menyimpan password: ' + err.message);
+    }
     setAdminPassword(newPassword);
     savePassword(newPassword);
   };
 
-  const handleSaveCategories = (newCategories: CategoryData[]) => {
-    setCategories(newCategories);
-    // Jika kategori aktif tidak ada lagi di daftar baru, reset ke 'all'
-    if (activeCategory !== 'all' && !newCategories.some(c => c.id === activeCategory)) {
-      setActiveCategory('all');
+  const handleSaveCategories = async (newCategories: CategoryData[]) => {
+    try {
+      if (backendOnline) {
+        // Determine changes
+        const oldIds = categories.map(c => c.id);
+        const newIds = newCategories.map(c => c.id);
+        const toDelete = oldIds.filter(id => !newIds.includes(id));
+        const toCreate = newCategories.filter(c => !oldIds.includes(c.id));
+        const toUpdate = newCategories.filter(c => {
+          const old = categories.find(oc => oc.id === c.id);
+          return old && (old.label !== c.label || old.iconName !== c.iconName);
+        });
+
+        await Promise.all(toDelete.map(id => deleteCategoryApi(id)));
+        await Promise.all(toCreate.map(c => createCategory(c)));
+        await Promise.all(toUpdate.map(c => updateCategoryApi(c)));
+      }
+      setCategories(newCategories);
+      if (activeCategory !== 'all' && !newCategories.some(c => c.id === activeCategory)) {
+        setActiveCategory('all');
+      }
+    } catch (err: any) {
+      setError('Gagal menyimpan kategori: ' + err.message);
     }
   };
 
-  // Build list kategori untuk tampilan (all + dynamic categories)
   const displayCategories = [
     { id: 'all', label: 'Semua', iconName: 'Globe' },
     ...categories,
   ];
+
+  if (loading) {
+    return (
+      <div className="portal-container min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 text-blue-400 animate-spin mx-auto mb-4" />
+          <p className="text-slate-400">Memuat data...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="portal-container min-h-screen">
@@ -198,7 +318,7 @@ export default function Home() {
         <p className="text-slate-400 text-lg max-w-2xl mx-auto">
           Akses cepat ke website favorit Anda dalam satu portal
         </p>
-        
+
         {/* Admin Badge */}
         {isAdmin && (
           <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40">
@@ -206,7 +326,28 @@ export default function Home() {
             <span className="text-xs font-medium text-amber-400">Mode Admin</span>
           </div>
         )}
+
+        {/* Backend Status */}
+        <div className="mt-3 flex justify-center gap-2">
+          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${backendOnline ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${backendOnline ? 'bg-emerald-400' : 'bg-slate-400'}`} />
+            {backendOnline ? 'Backend Online' : 'Backend Offline'}
+          </span>
+        </div>
       </header>
+
+      {/* Error Banner */}
+      {error && (
+        <div className="max-w-2xl mx-auto px-4 mb-4">
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span>{error}</span>
+            <button onClick={() => setError('')} className="ml-auto text-red-400 hover:text-red-300">
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Search & Actions */}
       <div className="max-w-2xl mx-auto px-4 mb-8">
@@ -222,7 +363,7 @@ export default function Home() {
               style={{ color: '#ffffff' }}
             />
           </div>
-          
+
           {isAdmin ? (
             <>
               <button
@@ -258,7 +399,7 @@ export default function Home() {
             </button>
           )}
         </div>
-        
+
         {/* Reset to default - admin only */}
         {isAdmin && (
           <div className="flex justify-end mt-2">
@@ -352,7 +493,7 @@ export default function Home() {
         editingLink={editingLink}
         categories={categories}
       />
-      
+
       <LoginDialog
         open={loginOpen}
         onOpenChange={setLoginOpen}
