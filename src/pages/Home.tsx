@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Search, Globe, Plus, LogIn, LogOut, Shield, Settings, Tags, Loader2, AlertCircle
+  Search, Plus, LogIn, LogOut, Shield, Settings, Tags, Loader2, AlertCircle
 } from 'lucide-react';
 import LinkCard from '@/components/LinkCard';
 import LinkDialog, { type LinkData } from '@/components/LinkDialog';
@@ -203,10 +203,10 @@ export default function Home() {
       if (backendOnline) {
         if (editingLink) {
           const updated = await updateLinkApi(link);
-          setLinks(prev => prev.map(l => l.id === updated.id ? { ...updated, iconName: updated.iconName || updated.icon_name } : l));
+          setLinks(prev => prev.map(l => l.id === updated.id ? updated : l));
         } else {
           const created = await createLink(link);
-          setLinks(prev => [...prev, { ...created, iconName: created.iconName || created.icon_name }]);
+          setLinks(prev => [...prev, created]);
         }
       } else {
         if (editingLink) {
@@ -308,13 +308,12 @@ export default function Home() {
       {/* Header */}
       <header className="pt-12 pb-8 px-4 text-center">
         <div className="animate-float mb-6">
-          <div className="w-20 h-20 mx-auto bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg">
-            <Globe className="w-10 h-10 text-white" />
-          </div>
+          <img
+            src="/portal-logo.png"
+            alt="Portal Logo"
+            className="w-48 md:w-56 mx-auto drop-shadow-lg"
+          />
         </div>
-        <h1 className="text-4xl md:text-5xl font-bold text-white mb-3">
-          Portal Link
-        </h1>
         <p className="text-slate-400 text-lg max-w-2xl mx-auto">
           Akses cepat ke website favorit Anda dalam satu portal
         </p>
